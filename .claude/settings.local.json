@@ -1,0 +1,13 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(claude mcp add:*)",
+      "Bash(claude mcp:*)"
+    ]
+  },
+  "enabledMcpjsonServers": [
+    "awslabs-core",
+    "awslabs-cdk",
+    "awslabs-api"
+  ]
+}
