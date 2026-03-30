@@ -2,7 +2,18 @@
   "permissions": {
     "allow": [
       "Bash(claude mcp add:*)",
-      "Bash(claude mcp:*)"
+      "Bash(claude mcp:*)",
+      "Bash(aws sagemaker:*)",
+      "Bash(python infra/setup.py --phase 3)",
+      "Bash(aws ecr:*)",
+      "Bash(aws iam update-assume-role-policy --role-name stock-predictor-lambda-role --policy-document '{:*)",
+      "Bash(python:*)",
+      "Bash(aws secretsmanager:*)",
+      "Bash(ACCOUNT_ID=863084987436)",
+      "Bash(REGION=us-east-1)",
+      "Bash(__NEW_LINE_da0f776a80028894__ aws:*)",
+      "Bash(aws lambda:*)",
+      "Bash(docker:*)"
     ]
   },
   "enabledMcpjsonServers": [

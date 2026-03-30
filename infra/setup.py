@@ -10,8 +10,10 @@ Run per phase:
 
 import argparse
 import boto3
+from botocore.exceptions import ClientError
 import json
 import zipfile
+import tarfile
 import io
 import os
 
@@ -19,7 +21,7 @@ REGION = "us-east-1"
 ACCOUNT_ID = boto3.client("sts").get_caller_identity()["Account"]
 
 # Resource names
-BUCKET        = "stock-predictor-bucket"
+BUCKET        = f"stock-predictor-{ACCOUNT_ID}"
 LAMBDA_NAME   = "stock-predictor-daily-inference"
 SM_ENDPOINT   = "stock-predictor-chronos-endpoint"
 SM_MODEL      = "stock-predictor-chronos-model"
@@ -117,6 +119,7 @@ def get_secret():
         raise e
 
     secret = get_secret_value_response['SecretString']
+    return secret
 
 def create_lambda_role(iam):
     print("Creating Lambda IAM role...")
@@ -124,7 +127,12 @@ def create_lambda_role(iam):
         "Version": "2012-10-17",
         "Statement": [{
             "Effect": "Allow",
-            "Principal": {"Service": "lambda.amazonaws.com"},
+            "Principal": {
+                "Service": [
+                    "lambda.amazonaws.com",
+                    "sagemaker.amazonaws.com",   # needed for SageMaker model execution
+                ]
+            },
             "Action": "sts:AssumeRole"
         }]
     }
@@ -152,24 +160,91 @@ def create_lambda_role(iam):
     return role_arn
 
 
-def create_sagemaker_endpoint(sm_client):
+def upload_model_artifact(s3):
+    """
+    Package a custom inference.py + requirements.txt into model.tar.gz and upload to S3.
+    Chronos is a time-series model with no standard HuggingFace task type, so we need
+    a custom handler that loads it via the chronos-forecasting package.
+    """
+    inference_py = '''
+import json
+import torch
+import numpy as np
+
+def model_fn(model_dir):
+    # Download Chronos-Bolt from HuggingFace Hub at cold-start
+    from chronos import ChronosBoltPipeline
+    pipeline = ChronosBoltPipeline.from_pretrained(
+        "amazon/chronos-bolt-base",
+        device_map="cpu",
+        torch_dtype=torch.float32,
+    )
+    return pipeline
+
+def input_fn(request_body, content_type):
+    return json.loads(request_body)
+
+def predict_fn(data, pipeline):
+    prices   = data["inputs"]        # list of lists (one per ticker)
+    pred_len = data.get("parameters", {}).get("prediction_length", 1)
+    context  = [torch.tensor(p, dtype=torch.float32) for p in prices]
+    # context and prediction_length are positional args in ChronosBoltPipeline.predict()
+    forecast = pipeline.predict(context, pred_len)
+    # forecast: list of tensors [n_samples, pred_len] per series — return medians
+    medians  = [float(np.median(f.numpy())) for f in forecast]
+    return {"predictions": medians}
+
+def output_fn(prediction, accept):
+    return json.dumps(prediction), "application/json"
+'''.strip()
+
+    requirements_txt = "chronos-forecasting\n"
+
+    buf = io.BytesIO()
+    with tarfile.open(fileobj=buf, mode="w:gz") as tar:
+        for name, content in [("code/inference.py", inference_py),
+                               ("code/requirements.txt", requirements_txt)]:
+            encoded = content.encode("utf-8")
+            info = tarfile.TarInfo(name=name)
+            info.size = len(encoded)
+            tar.addfile(info, io.BytesIO(encoded))
+    buf.seek(0)
+
+    key = "sagemaker/chronos/model.tar.gz"
+    s3.put_object(Bucket=BUCKET, Key=key, Body=buf.read())
+    uri = f"s3://{BUCKET}/{key}"
+    print(f"  Model artifact uploaded: {uri}")
+    return uri
+
+
+def create_sagemaker_endpoint(sm_client, s3_client):
     print("Creating SageMaker Serverless endpoint for Chronos-2...")
+
+    model_uri = upload_model_artifact(s3_client)
+
+    # PyTorch 2.6.0 container — already satisfies chronos-forecasting's torch>=2.2
+    # requirement, so pip only downloads the small chronos packages, not a new torch.
+    image = (
+        f"763104351884.dkr.ecr.{REGION}.amazonaws.com/"
+        "pytorch-inference:2.6.0-cpu-py312-ubuntu22.04-sagemaker-v1.67"
+    )
 
     # Model
     try:
         sm_client.create_model(
             ModelName=SM_MODEL,
             PrimaryContainer={
-                "Image": f"763104351884.dkr.ecr.{REGION}.amazonaws.com/huggingface-pytorch-inference:2.1.0-transformers4.37.0-cpu-py310-ubuntu22.04",
+                "Image": image,
+                "ModelDataUrl": model_uri,
                 "Environment": {
-                    "HF_MODEL_ID": "amazon/chronos-bolt-base",
-                    "HF_TASK": "text-generation",
+                    "SAGEMAKER_PROGRAM": "inference.py",
+                    "SAGEMAKER_SUBMIT_DIRECTORY": "/opt/ml/model/code",
                 }
             },
             ExecutionRoleArn=f"arn:aws:iam::{ACCOUNT_ID}:role/{LAMBDA_ROLE}",
         )
         print(f"  Created model: {SM_MODEL}")
-    except sm_client.exceptions.ResourceInUse:
+    except (sm_client.exceptions.ResourceInUse, ClientError):
         print(f"  Model already exists: {SM_MODEL}")
 
     # Endpoint config (Serverless)
@@ -180,13 +255,13 @@ def create_sagemaker_endpoint(sm_client):
                 "VariantName": "AllTraffic",
                 "ModelName": SM_MODEL,
                 "ServerlessConfig": {
-                    "MemorySizeInMB": 4096,
+                    "MemorySizeInMB": 3072,
                     "MaxConcurrency": 5,
                 }
             }]
         )
         print(f"  Created endpoint config: {SM_CONFIG}")
-    except sm_client.exceptions.ResourceInUse:
+    except (sm_client.exceptions.ResourceInUse, ClientError):
         print(f"  Endpoint config already exists: {SM_CONFIG}")
 
     # Endpoint
@@ -196,7 +271,7 @@ def create_sagemaker_endpoint(sm_client):
             EndpointConfigName=SM_CONFIG,
         )
         print(f"  Creating endpoint: {SM_ENDPOINT} (takes ~5 min, check AWS Console)")
-    except sm_client.exceptions.ResourceInUse:
+    except (sm_client.exceptions.ResourceInUse, ClientError):
         print(f"  Endpoint already exists: {SM_ENDPOINT}")
 
 
@@ -219,7 +294,6 @@ def create_lambda(lm, role_arn):
             Code={"ZipFile": buf.read()},
             Timeout=900,          # 15 min max — Chronos cold start can be slow
             MemorySize=512,
-            ReservedConcurrentExecutions=1,
             Environment={
                 "Variables": {
                     "S3_BUCKET": BUCKET,
@@ -227,6 +301,11 @@ def create_lambda(lm, role_arn):
                     "REGION": REGION,
                 }
             }
+        )
+        # Set reserved concurrency separately — prevents duplicate runs
+        lm.put_function_concurrency(
+            FunctionName=LAMBDA_NAME,
+            ReservedConcurrentExecutions=1,
         )
         print(f"  Created Lambda: {LAMBDA_NAME}")
         print("  !! Deploy real inference/lambda_handler.py before triggering !!")
@@ -307,9 +386,11 @@ def main():
         create_s3(s3)
 
     if args.phase >= 3:
-        create_secret(sm_sec)
+        print("Fetching Alpha Vantage key from Secrets Manager...")
+        get_secret()
+        print("  Secret verified.")
         role_arn = create_lambda_role(iam)
-        create_sagemaker_endpoint(sm)
+        create_sagemaker_endpoint(sm, s3)
         create_lambda(lm, role_arn)
 
     if args.phase >= 4:
