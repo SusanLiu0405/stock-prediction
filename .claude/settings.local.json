@@ -13,7 +13,14 @@
       "Bash(REGION=us-east-1)",
       "Bash(__NEW_LINE_da0f776a80028894__ aws:*)",
       "Bash(aws lambda:*)",
-      "Bash(docker:*)"
+      "Bash(docker:*)",
+      "Bash(aws sts:*)",
+      "Bash(rm -rf /tmp/lambda-pkg)",
+      "Bash(mkdir /tmp/lambda-pkg pip install --platform manylinux2014_x86_64 --implementation cp --python-version 311 --only-binary=:all: --target /tmp/lambda-pkg yfinance requests numpy)",
+      "Bash(head -5 find /tmp/lambda-pkg -name _cffi_backend*.so)",
+      "Bash(cp /Users/susanliu/stock-prediction/inference/lambda_handler.py /tmp/lambda-pkg/)",
+      "Bash(zip -r /tmp/lambda.zip . -x \"*.pyc\" -x \"*/__pycache__/*\" -q)",
+      "Read(//tmp/**)"
     ]
   },
   "enabledMcpjsonServers": [
