@@ -180,39 +180,7 @@
     .badge-up { background: rgba(52, 211, 153, 0.15); color: #34d399; }
     .badge-down { background: rgba(248, 113, 113, 0.15); color: #f87171; }
 
-    .sentiment-bar-wrap {
-      display: flex;
-      align-items: center;
-      gap: 8px;
-      justify-content: flex-end;
-    }
-
-    .sentiment-bar {
-      width: 60px;
-      height: 4px;
-      background: #1e2130;
-      border-radius: 2px;
-      overflow: hidden;
-    }
-
-    .sentiment-fill {
-      height: 100%;
-      border-radius: 2px;
-      transition: width 0.3s;
-    }
-
-    .sentiment-pos { background: #34d399; }
-    .sentiment-neg { background: #f87171; }
-    .sentiment-neu { background: #64748b; }
-
-    .sentiment-score {
-      font-size: 0.75rem;
-      color: #64748b;
-      min-width: 32px;
-      text-align: right;
-    }
-
-    .rank-badge {
+.rank-badge {
       display: inline-flex;
       align-items: center;
       justify-content: center;
@@ -268,7 +236,6 @@
         <th class="num">Open</th>
         <th class="num">Prev Close</th>
         <th class="num">Predicted Close</th>
-        <th class="num">Sentiment</th>
       </tr>
     </thead>
     <tbody id="tableBody"></tbody>
@@ -319,24 +286,7 @@
     return `<span class="predicted ${cls}">$${predicted_close.toFixed(2)}${badge}</span>`;
   }
 
-  function sentimentCell(score) {
-    if (score === null || score === undefined) {
-      return '<span class="price-null">--</span>';
-    }
-    // score is -1..1; normalise to 0..100 for bar width
-    const norm = Math.round(((score + 1) / 2) * 100);
-    let cls = score >= 0.2 ? "sentiment-pos" : score <= -0.2 ? "sentiment-neg" : "sentiment-neu";
-    const label = score >= 0.2 ? "Pos" : score <= -0.2 ? "Neg" : "Neu";
-    return `
-      <div class="sentiment-bar-wrap">
-        <span class="sentiment-score">${label} ${score.toFixed(2)}</span>
-        <div class="sentiment-bar">
-          <div class="sentiment-fill ${cls}" style="width:${norm}%"></div>
-        </div>
-      </div>`;
-  }
-
-  function buildRow(row, rank) {
+function buildRow(row, rank) {
     return `
       <tr data-ticker="${row.ticker}">
         <td><span class="rank-badge">${rank}</span></td>
@@ -349,7 +299,6 @@
         <td class="num">${fmt(row.open)}</td>
         <td class="num">${fmt(row.previous_close)}</td>
         <td class="num">${predictedCell(row)}</td>
-        <td class="num">${sentimentCell(row.sentiment)}</td>
       </tr>`;
   }
 

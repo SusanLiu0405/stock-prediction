@@ -18,12 +18,10 @@ Environment variables (set by setup.py):
 
 import os
 import json
-import time
 import logging
 import datetime
 import boto3
 import yfinance as yf
-import requests
 import numpy as np
 
 logger = logging.getLogger()
@@ -36,7 +34,6 @@ logger.setLevel(logging.INFO)
 REGION      = os.environ.get("REGION", "us-east-1")
 S3_BUCKET   = os.environ.get("S3_BUCKET", "stock-predictor-863084987436")
 SM_ENDPOINT = os.environ.get("SM_ENDPOINT", "stock-predictor-chronos-endpoint")
-SECRET_NAME = "stock-predictor/alpha-vantage-key"
 TOP_N       = 25
 PRICE_DAYS  = 500   # trading days of history sent to Chronos
 
@@ -64,19 +61,6 @@ COMPANY_NAMES = {
     "ABBV": "AbbVie Inc.", "KO": "Coca-Cola",
     "NFLX": "Netflix Inc.",
 }
-
-# ---------------------------------------------------------------------------
-# Secrets
-# ---------------------------------------------------------------------------
-
-def get_secret():
-    """Retrieve Alpha Vantage API key from AWS Secrets Manager."""
-    session = boto3.session.Session()
-    client = session.client(service_name="secretsmanager", region_name=REGION)
-    response = client.get_secret_value(SecretId=SECRET_NAME)
-    secret = json.loads(response["SecretString"])
-    # Secret stored as {"ALPHA_VANTAGE_API_KEY": "YOUR_KEY"}
-    return secret["ALPHA_VANTAGE_API_KEY"]
 
 # ---------------------------------------------------------------------------
 # Step 1: Rank tickers by market cap
@@ -128,38 +112,8 @@ def get_news(ticker: str):
         title = content.get("title") or item.get("title", "")
         url   = (content.get("canonicalUrl") or {}).get("url") or item.get("link", "")
         if title:
-            items.append({"title": title, "url": url, "sentiment": None})
+            items.append({"title": title, "url": url})
     return items
-
-def get_sentiment(ticker: str, api_key: str):
-    """
-    Fetch the latest sentiment score from Alpha Vantage News Sentiment API.
-    Returns a float in [-1, 1] or None on failure.
-    """
-    url = (
-        "https://www.alphavantage.co/query"
-        f"?function=NEWS_SENTIMENT&tickers={ticker}&limit=5&apikey={api_key}"
-    )
-    try:
-        resp = requests.get(url, timeout=10)
-        resp.raise_for_status()
-        data = resp.json()
-        feed = data.get("feed", [])
-        if not feed:
-            return None
-        # Average the ticker-specific relevance-weighted sentiment scores
-        scores = []
-        for article in feed:
-            for ts in article.get("ticker_sentiment", []):
-                if ts.get("ticker") == ticker:
-                    try:
-                        scores.append(float(ts["ticker_sentiment_score"]))
-                    except (KeyError, ValueError):
-                        pass
-        return round(sum(scores) / len(scores), 4) if scores else None
-    except Exception as e:
-        logger.warning(f"sentiment fetch failed for {ticker}: {e}")
-        return None
 
 # ---------------------------------------------------------------------------
 # Step 4: Chronos inference
@@ -217,13 +171,6 @@ def handler(event, context):
     s3_client = boto3.client("s3", region_name=REGION)
     sm_client = boto3.client("sagemaker-runtime", region_name=REGION)
 
-    # Fetch Alpha Vantage key once
-    try:
-        av_api_key = get_secret()
-    except Exception as e:
-        logger.error(f"Could not retrieve secret: {e}")
-        raise
-
     # Step 1: determine Top 25 tickers
     tickers = get_top_n_tickers(TOP_N)
 
@@ -242,13 +189,8 @@ def handler(event, context):
             open_price  = round(float(hist["Open"].iloc[-1]), 2)  if len(hist) >= 1 else None
             prev_close  = round(float(hist["Close"].iloc[-2]), 2) if len(hist) >= 2 else None
 
-            # Step 3: news + sentiment
-            news        = get_news(sym)
-            sentiment   = get_sentiment(sym, av_api_key)
-
-            # Attach sentiment score to each news item (shared score for now)
-            for item in news:
-                item["sentiment"] = sentiment
+            # Step 3: news headlines
+            news = get_news(sym)
 
             # Step 4: Chronos prediction
             predicted_close = call_chronos(prices, sm_client)
@@ -270,9 +212,6 @@ def handler(event, context):
             logger.error(f"Failed to process {sym}: {e}", exc_info=True)
             # Continue with remaining tickers rather than aborting the whole run
 
-        # Respect Alpha Vantage free-tier rate limit (5 req/min)
-        time.sleep(12)
-
     logger.info(f"Done. Processed {len(results)}/{len(tickers)} tickers: {results}")
     return {"statusCode": 200, "processed": results}
 
@@ -290,12 +229,6 @@ if __name__ == "__main__":
     s3 = boto3.client("s3", region_name=REGION)
     sm = boto3.client("sagemaker-runtime", region_name=REGION)
 
-    try:
-        av_key = get_secret()
-    except Exception as e:
-        print(f"Secret fetch failed: {e}")
-        sys.exit(1)
-
     prices = get_close_prices(test_ticker)
     print(f"{test_ticker}: {len(prices)} days of price history loaded")
 
@@ -303,10 +236,7 @@ if __name__ == "__main__":
     open_price = round(float(hist["Open"].iloc[-1]), 2)
     prev_close = round(float(hist["Close"].iloc[-2]), 2)
 
-    news      = get_news(test_ticker)
-    sentiment = get_sentiment(test_ticker, av_key)
-    for item in news:
-        item["sentiment"] = sentiment
+    news = get_news(test_ticker)
 
     predicted_close = call_chronos(prices, sm)
 

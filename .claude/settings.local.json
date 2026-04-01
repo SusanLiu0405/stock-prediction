@@ -20,7 +20,11 @@
       "Bash(head -5 find /tmp/lambda-pkg -name _cffi_backend*.so)",
       "Bash(cp /Users/susanliu/stock-prediction/inference/lambda_handler.py /tmp/lambda-pkg/)",
       "Bash(zip -r /tmp/lambda.zip . -x \"*.pyc\" -x \"*/__pycache__/*\" -q)",
-      "Read(//tmp/**)"
+      "Read(//tmp/**)",
+      "Bash(aws s3:*)",
+      "Bash(for ticker:*)",
+      "Bash(do echo:*)",
+      "Bash(python3 -c \"import json,sys; d=json.load\\(sys.stdin\\); print\\([n[''''sentiment''''] for n in d.get\\(''''news'''',[]\\)]\\)\" done)"
     ]
   },
   "enabledMcpjsonServers": [
