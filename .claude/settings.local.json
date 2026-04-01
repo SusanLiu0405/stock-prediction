@@ -24,7 +24,8 @@
       "Bash(aws s3:*)",
       "Bash(for ticker:*)",
       "Bash(do echo:*)",
-      "Bash(python3 -c \"import json,sys; d=json.load\\(sys.stdin\\); print\\([n[''''sentiment''''] for n in d.get\\(''''news'''',[]\\)]\\)\" done)"
+      "Bash(python3 -c \"import json,sys; d=json.load\\(sys.stdin\\); print\\([n[''''sentiment''''] for n in d.get\\(''''news'''',[]\\)]\\)\" done)",
+      "Bash(mkdir /tmp/lambda-pkg pip install --platform manylinux2014_x86_64 --implementation cp --python-version 311 --only-binary=:all: --target /tmp/lambda-pkg yfinance numpy)"
     ]
   },
   "enabledMcpjsonServers": [

@@ -1,0 +1,445 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>S&P 500 Stock Predictor</title>
+  <script src="https://cdn.jsdelivr.net/npm/fuse.js@7.0.0/dist/fuse.min.js"></script>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+      background: #0f1117;
+      color: #e2e8f0;
+      min-height: 100vh;
+      padding: 32px 24px;
+    }
+
+    header {
+      max-width: 960px;
+      margin: 0 auto 32px;
+    }
+
+    header h1 {
+      font-size: 1.6rem;
+      font-weight: 700;
+      color: #f8fafc;
+      margin-bottom: 4px;
+    }
+
+    header p {
+      font-size: 0.85rem;
+      color: #64748b;
+    }
+
+    .search-wrapper {
+      max-width: 960px;
+      margin: 0 auto 24px;
+      position: relative;
+    }
+
+    .search-wrapper input {
+      width: 100%;
+      padding: 10px 16px;
+      background: #1e2130;
+      border: 1px solid #2d3250;
+      border-radius: 8px;
+      color: #e2e8f0;
+      font-size: 0.9rem;
+      outline: none;
+      transition: border-color 0.15s;
+    }
+
+    .search-wrapper input:focus {
+      border-color: #4f8ef7;
+    }
+
+    .search-wrapper input::placeholder {
+      color: #4a5568;
+    }
+
+    .dropdown {
+      position: absolute;
+      top: calc(100% + 4px);
+      left: 0;
+      right: 0;
+      background: #1e2130;
+      border: 1px solid #2d3250;
+      border-radius: 8px;
+      z-index: 100;
+      overflow: hidden;
+      box-shadow: 0 8px 24px rgba(0,0,0,0.4);
+      display: none;
+    }
+
+    .dropdown.visible { display: block; }
+
+    .dropdown-item {
+      padding: 10px 16px;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      font-size: 0.875rem;
+      transition: background 0.1s;
+    }
+
+    .dropdown-item:hover, .dropdown-item.highlighted {
+      background: #2d3250;
+    }
+
+    .dropdown-item .sym {
+      font-weight: 700;
+      color: #4f8ef7;
+      min-width: 56px;
+    }
+
+    .dropdown-item .name {
+      color: #94a3b8;
+    }
+
+    .dropdown-empty {
+      padding: 12px 16px;
+      font-size: 0.875rem;
+      color: #4a5568;
+    }
+
+    .table-wrapper {
+      max-width: 960px;
+      margin: 0 auto;
+      border-radius: 10px;
+      overflow: hidden;
+      border: 1px solid #1e2130;
+    }
+
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 0.875rem;
+    }
+
+    thead {
+      background: #161824;
+    }
+
+    thead th {
+      padding: 12px 20px;
+      text-align: left;
+      font-weight: 600;
+      font-size: 0.75rem;
+      text-transform: uppercase;
+      letter-spacing: 0.06em;
+      color: #64748b;
+      border-bottom: 1px solid #1e2130;
+    }
+
+    thead th.num { text-align: right; }
+
+    tbody tr {
+      background: #12141e;
+      border-bottom: 1px solid #1a1d2a;
+      transition: background 0.1s;
+    }
+
+    tbody tr:last-child { border-bottom: none; }
+    tbody tr:hover { background: #1a1d2a; }
+
+    td {
+      padding: 14px 20px;
+      vertical-align: middle;
+    }
+
+    td.num { text-align: right; font-variant-numeric: tabular-nums; }
+
+    .ticker-cell { display: flex; flex-direction: column; gap: 2px; }
+    .ticker-sym { font-weight: 700; color: #f8fafc; font-size: 0.9rem; }
+    .ticker-name { font-size: 0.75rem; color: #4a5568; }
+
+    .price { color: #e2e8f0; }
+    .price-null { color: #2d3250; }
+
+    .predicted {
+      font-weight: 600;
+    }
+
+    .predicted.up { color: #34d399; }
+    .predicted.down { color: #f87171; }
+    .predicted.flat { color: #e2e8f0; }
+    .predicted.null-val { color: #2d3250; }
+
+    .direction-badge {
+      display: inline-block;
+      font-size: 0.7rem;
+      padding: 1px 6px;
+      border-radius: 4px;
+      margin-left: 6px;
+      font-weight: 600;
+    }
+
+    .badge-up { background: rgba(52, 211, 153, 0.15); color: #34d399; }
+    .badge-down { background: rgba(248, 113, 113, 0.15); color: #f87171; }
+
+.rank-badge {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      width: 24px;
+      height: 24px;
+      border-radius: 50%;
+      background: #1e2130;
+      color: #64748b;
+      font-size: 0.7rem;
+      font-weight: 700;
+    }
+
+    .no-results {
+      max-width: 960px;
+      margin: 0 auto;
+      padding: 48px 0;
+      text-align: center;
+      color: #4a5568;
+      font-size: 0.9rem;
+      display: none;
+    }
+
+    .no-results.visible { display: block; }
+
+    .date-note {
+      max-width: 960px;
+      margin: 0 auto 12px;
+      font-size: 0.75rem;
+      color: #4a5568;
+    }
+  </style>
+</head>
+<body>
+
+<header>
+  <h1>S&P 500 Next-Day Predictor</h1>
+  <p>Top 25 by market cap · Powered by Amazon Chronos-2 · Updates daily at 6:30 PM ET</p>
+</header>
+
+<div class="search-wrapper">
+  <input type="text" id="searchInput" placeholder="Search ticker or company name…" autocomplete="off" />
+  <div class="dropdown" id="dropdown"></div>
+</div>
+
+<div class="date-note" id="dateNote"></div>
+
+<div class="table-wrapper" id="tableWrapper">
+  <table>
+    <thead>
+      <tr>
+        <th style="width:36px"></th>
+        <th>Ticker</th>
+        <th class="num">Open</th>
+        <th class="num">Prev Close</th>
+        <th class="num">Predicted Close</th>
+      </tr>
+    </thead>
+    <tbody id="tableBody"></tbody>
+  </table>
+</div>
+
+<div class="no-results" id="noResults">No tickers found</div>
+
+<script>
+  // ── Config ─────────────────────────────────────────────────────────────────
+  const S3_BASE = "https://stock-predictor-863084987436.s3.amazonaws.com";
+  const TICKER_SYMS = ["AAPL","ABBV","AMD","AMZN","AVGO","BAC","BRK-B","CAT","COST","CVX","GOOGL","JNJ","JPM","LLY","MA","META","MSFT","NFLX","NVDA","ORCL","PG","TSLA","V","WMT","XOM"];
+  const COMPANY_NAMES = {
+    AAPL: "Apple Inc.", MSFT: "Microsoft Corporation", NVDA: "NVIDIA Corporation",
+    AMZN: "Amazon.com Inc.", GOOGL: "Alphabet Inc.", META: "Meta Platforms Inc.",
+    BRK: "Berkshire Hathaway", TSLA: "Tesla Inc.", LLY: "Eli Lilly",
+    V: "Visa Inc.", JPM: "JPMorgan Chase", UNH: "UnitedHealth Group",
+    XOM: "Exxon Mobil", WMT: "Walmart Inc.", MA: "Mastercard",
+    JNJ: "Johnson & Johnson", PG: "Procter & Gamble", COST: "Costco",
+    HD: "Home Depot", AVGO: "Broadcom Inc.", MRK: "Merck & Co.",
+    CVX: "Chevron Corporation", ABBV: "AbbVie Inc.", KO: "Coca-Cola",
+    NFLX: "Netflix Inc."
+  };
+
+  // ── Helpers ────────────────────────────────────────────────────────────────
+  function fmt(val) {
+    if (val === null || val === undefined) return '<span class="price-null">--</span>';
+    return '<span class="price">$' + val.toFixed(2) + '</span>';
+  }
+
+  function predictedCell(row) {
+    const { previous_close, predicted_close } = row;
+    if (predicted_close === null || predicted_close === undefined) {
+      return '<span class="predicted null-val">--</span>';
+    }
+    let cls = "flat", badge = "";
+    if (previous_close !== null && previous_close !== undefined) {
+      const diff = predicted_close - previous_close;
+      const pct = ((diff / previous_close) * 100).toFixed(2);
+      if (diff > 0) {
+        cls = "up";
+        badge = `<span class="direction-badge badge-up">▲ ${pct}%</span>`;
+      } else if (diff < 0) {
+        cls = "down";
+        badge = `<span class="direction-badge badge-down">▼ ${Math.abs(pct)}%</span>`;
+      }
+    }
+    return `<span class="predicted ${cls}">$${predicted_close.toFixed(2)}${badge}</span>`;
+  }
+
+function buildRow(row, rank) {
+    return `
+      <tr data-ticker="${row.ticker}">
+        <td><span class="rank-badge">${rank}</span></td>
+        <td>
+          <div class="ticker-cell">
+            <span class="ticker-sym">${row.ticker}</span>
+            <span class="ticker-name">${row.name}</span>
+          </div>
+        </td>
+        <td class="num">${fmt(row.open)}</td>
+        <td class="num">${fmt(row.previous_close)}</td>
+        <td class="num">${predictedCell(row)}</td>
+      </tr>`;
+  }
+
+  // ── Render ─────────────────────────────────────────────────────────────────
+  const tbody = document.getElementById("tableBody");
+  const noResults = document.getElementById("noResults");
+  const tableWrapper = document.getElementById("tableWrapper");
+  const dateNote = document.getElementById("dateNote");
+
+  let ALL_TICKERS = [];
+  let fuse = null;
+
+  function renderTable(rows) {
+    if (rows.length === 0) {
+      tableWrapper.style.display = "none";
+      noResults.classList.add("visible");
+    } else {
+      tableWrapper.style.display = "";
+      noResults.classList.remove("visible");
+      tbody.innerHTML = rows.map((r, i) => buildRow(r, i + 1)).join("");
+    }
+  }
+
+  // ── S3 fetch ───────────────────────────────────────────────────────────────
+  async function loadFromS3() {
+    dateNote.textContent = "Loading…";
+    tableWrapper.style.display = "none";
+
+    const results = await Promise.allSettled(
+      TICKER_SYMS.map(sym =>
+        fetch(`${S3_BASE}/predictions/${sym}/latest.json`)
+          .then(r => { if (!r.ok) throw new Error(r.status); return r.json(); })
+          .then(data => ({ ...data, name: COMPANY_NAMES[data.ticker] || data.ticker }))
+      )
+    );
+
+    ALL_TICKERS = results
+      .filter(r => r.status === "fulfilled")
+      .map(r => r.value);
+
+    if (ALL_TICKERS.length === 0) {
+      dateNote.textContent = "Failed to load data from S3.";
+      return;
+    }
+
+    dateNote.textContent = `Predictions as of ${ALL_TICKERS[0].date} · ${ALL_TICKERS.length} tickers`;
+    renderTable(ALL_TICKERS);
+
+    fuse = new Fuse(ALL_TICKERS, {
+      keys: ["ticker", "name"],
+      threshold: 0.35,
+      includeScore: true
+    });
+  }
+
+  loadFromS3();
+
+  // ── Fuse.js fuzzy search ───────────────────────────────────────────────────
+
+  const input = document.getElementById("searchInput");
+  const dropdown = document.getElementById("dropdown");
+  let highlightIdx = -1;
+  let dropdownItems = [];
+
+  function updateDropdown(results) {
+    if (results.length === 0) {
+      dropdown.innerHTML = '<div class="dropdown-empty">No tickers found</div>';
+      dropdownItems = [];
+    } else {
+      dropdownItems = results.map(r => r.item);
+      dropdown.innerHTML = results.map((r, i) => `
+        <div class="dropdown-item" data-idx="${i}">
+          <span class="sym">${r.item.ticker}</span>
+          <span class="name">${r.item.name}</span>
+        </div>`).join("");
+      dropdown.querySelectorAll(".dropdown-item").forEach((el, i) => {
+        el.addEventListener("mouseenter", () => setHighlight(i));
+        el.addEventListener("mouseleave", () => setHighlight(-1));
+        el.addEventListener("mousedown", (e) => {
+          e.preventDefault();
+          selectItem(i);
+        });
+      });
+    }
+    highlightIdx = -1;
+  }
+
+  function setHighlight(idx) {
+    highlightIdx = idx;
+    dropdown.querySelectorAll(".dropdown-item").forEach((el, i) => {
+      el.classList.toggle("highlighted", i === idx);
+    });
+  }
+
+  function selectItem(idx) {
+    const item = dropdownItems[idx];
+    if (!item) return;
+    input.value = item.ticker;
+    dropdown.classList.remove("visible");
+    renderTable([item]);
+  }
+
+  input.addEventListener("input", () => {
+    if (!fuse) return;
+    const q = input.value.trim();
+    if (q === "") {
+      dropdown.classList.remove("visible");
+      renderTable(ALL_TICKERS);
+      return;
+    }
+    const results = fuse.search(q);
+    updateDropdown(results);
+    dropdown.classList.add("visible");
+    renderTable(results.map(r => r.item));
+  });
+
+  input.addEventListener("keydown", (e) => {
+    if (!dropdown.classList.contains("visible")) return;
+    const items = dropdown.querySelectorAll(".dropdown-item");
+    if (e.key === "ArrowDown") {
+      e.preventDefault();
+      setHighlight(Math.min(highlightIdx + 1, items.length - 1));
+    } else if (e.key === "ArrowUp") {
+      e.preventDefault();
+      setHighlight(Math.max(highlightIdx - 1, 0));
+    } else if (e.key === "Enter") {
+      e.preventDefault();
+      if (highlightIdx >= 0) selectItem(highlightIdx);
+      else dropdown.classList.remove("visible");
+    } else if (e.key === "Escape") {
+      dropdown.classList.remove("visible");
+    }
+  });
+
+  input.addEventListener("blur", () => {
+    setTimeout(() => dropdown.classList.remove("visible"), 150);
+  });
+
+  input.addEventListener("focus", () => {
+    if (input.value.trim() !== "") dropdown.classList.add("visible");
+  });
+</script>
+</body>
+</html>
